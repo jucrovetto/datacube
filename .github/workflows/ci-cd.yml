@@ -1,0 +1,53 @@
+name: CI/CD DataCube JDK24
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Login en Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push de la imagen Docker
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            flynnspirit/data-cube:jdk24.0.1-ci
+            flynnspirit/data-cube:latest
+
+      - name: Despliegue remoto en Azure VM
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            # a) Docker login en la VM
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
+              --username ${{ secrets.DOCKERHUB_USER }} \
+              --password-stdin
+
+            # b) Pull de la imagen
+            docker pull flynnspirit/data-cube:jdk24.0.1-ci
+
+            # c) Detengo y elimino el contenedor anterior
+            docker rm -f cont-data-cube || true
+
+            # d) Arranco el nuevo contenedor con bind-mount
+            docker run -d \
+              --name cont-data-cube \
+              -p 80:80 \
+              -v /home/${{ secrets.REMOTE_USER }}/DataCube:/var/www/html:rw \
+              flynnspirit/data-cube:jdk24.0.1-ci
